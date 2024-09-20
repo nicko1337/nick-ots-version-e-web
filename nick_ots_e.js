@@ -1,6 +1,11 @@
 "use strict";
 
 // TODO: Consider mixing in some extra data regarding the parameter set (PRF, maybe more?).
+// TODO: WebGPU implementation
+// TODO: Should calculation of permutation ID not be inverted (i.e. should it lean towards the permutation chain)?
+// TODO: Checksum chain values are in little endian. Fix?
+// TODO: Move form inputs to dedicated classes?
+// TODO: Include content hash in signature filename?
 
 // Public key generation form
 const FORM_GENERATE_PUBLIC_KEY_NAME = "ots-generate-public-key";
