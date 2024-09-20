@@ -2,7 +2,6 @@
 
 // TODO: Consider mixing in some extra data regarding the parameter set (PRF, maybe more?).
 // TODO: WebGPU implementation
-// TODO: Should calculation of permutation ID not be inverted (i.e. should it lean towards the permutation chain)?
 // TODO: Checksum chain values are in little endian. Fix?
 // TODO: Move form inputs to dedicated classes?
 // TODO: Include content hash in signature filename?
@@ -1184,8 +1183,7 @@ function calculatePermutationIdFromDeltaIndices(deltaIndices)
 
     for(let i = 0; i < deltaIndices.length; i++)
     {
-        // We invert the sorted index to "even out" the chain values during verification, which generally speeds up verification done with simultaneous chain calculations.
-        choices[i] = (deltaIndices.length - 1) - getIndexInSortedArray(deltaIndices, i);
+        choices[i] = getIndexInSortedArray(deltaIndices, i);
     }
 
     return calculatePermutationIdFromChoices(choices);
