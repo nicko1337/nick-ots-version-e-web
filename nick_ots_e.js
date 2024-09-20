@@ -1700,14 +1700,16 @@ function getLargestValue(arr)
  * Equal numbers are ordered based on their indices within the unsorted array; the lower the index, the lower the resulting index.
  * 
  * @param {NumericArray} unsorted The array of unsorted numbers.
+ * @param {Number} startIdx The index of to start sorting at (inclusive).
  * @param {Number} unsortedIdx The index of the number within the unsorted array.
+ * @param {Number} endIdx The index of to stop sorting at (exclusive).
  * @returns {Number} The index that the number would be located at if the contents of the given array were sorted.
  */
-function getIndexInSortedArray(unsorted, unsortedIdx)
+function getIndexInSortedArray(unsorted, startIdx, unsortedIdx, endIdx)
 {
     let sortedIdx = 0;
 
-    for(let i = 0; i < unsorted.length; i++)
+    for(let i = startIdx; i < endIdx; i++)
     {
         sortedIdx +=
         (
@@ -1743,7 +1745,7 @@ function getDeltaIndices(nums, deltaIndicesDest = null)
 
     for(let i = 0; i < nums.length; i++)
     {
-        deltaIndicesDest[i] = getIndexInSortedArray(nums, i);
+        deltaIndicesDest[i] = getIndexInSortedArray(nums, 0, i, nums.length);
     }
 
     return deltaIndicesDest;
@@ -1795,31 +1797,6 @@ function getDeltaValues(nums, deltaIndices, deltaValuesDest = null)
 }
 
 /**
- * Calculates an ID that is unique to the ordering of values in an array that represents a "choice."
- * 
- * Each number in `choices` must be a unique integer in the range [0, `choices.length`).
- * 
- * @param {NumericArray} choices An array of numbers that each represent choices. The behavior of this function is undefined when invalid choices are provided.
- * @returns {Number} The ID of the permutation.
- */
-function calculatePermutationIdFromChoices(choices)
-{
-    let id = 0;
-
-    for(let i = 0, j = 0, dec = 0; i < choices.length - 1; i++)
-    {
-        for(j = 0, dec = 0; j < i; j++)
-        {
-            dec += Number(choices[j] < choices[i]);
-        }
-
-        id = id * (choices.length - i) + (choices[i] - dec);
-    }
-
-    return id;
-}
-
-/**
  * Calculates a permutation ID for an array of delta indices.
  * 
  * This function is used to calculate a permutation ID for a signature's delta indices.
@@ -1832,14 +1809,14 @@ function calculatePermutationIdFromChoices(choices)
  */
 function calculatePermutationIdFromDeltaIndices(deltaIndices)
 {
-    const choices = deltaIndices.slice();
+    let id = 0;
 
     for(let i = 0; i < deltaIndices.length; i++)
     {
-        choices[i] = getIndexInSortedArray(deltaIndices, i);
+        id = id * (deltaIndices.length - i) + getIndexInSortedArray(deltaIndices, i, i, deltaIndices.length);
     }
 
-    return calculatePermutationIdFromChoices(choices);
+    return id;
 }
 
 /**
