@@ -1457,9 +1457,8 @@ function createSigGroupConfig(numDeltaIndices)
     const gconf = new SigGroupConfig();
     gconf.numDeltaIndices = numDeltaIndices;
     gconf.numChains =
-        gconf.numDeltaIndices +
-        1 + // Permutation ID
-        numDeltaIndices;
+        gconf.numDeltaIndices + // Delta values
+        1; // Permutation ID
 
     gconf.maxDeltaIndex = gconf.numDeltaIndices - 1;
     gconf.maxDeltaValue = 255;
