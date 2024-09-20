@@ -1,6 +1,6 @@
 "use strict";
 
-// TODO: Consider mixing in some extra data regarding the parameter set (PRF, number of implicit delta indices, maybe more?).
+// TODO: Consider mixing in some extra data regarding the parameter set (PRF, maybe more?).
 
 // Public key generation form
 const FORM_GENERATE_PUBLIC_KEY_NAME = "ots-generate-public-key";
@@ -499,7 +499,7 @@ async function processGeneratePublicKeyFormElementsAsync(form)
     }
 
     // Context setup
-    const conf = createSigConfig(numGroups, HASH_SHA256_BIT_LENGTH / 8, numImplicitDeltaIndices * numGroups);
+    const conf = createSigConfig();
 
     // Create promises for generating private key values (calculated while other independent tasks run)
     const privateKeyPromises = await derivePrivateKeyFromMasterKey(HASH_SHA256_NAME, HASH_SHA256_BIT_LENGTH, masterKeyBuf, conf.numChains);
@@ -533,16 +533,6 @@ async function processGeneratePublicKeyFormElementsAsync(form)
             for(let gi = 0; gi < conf.numGroups; gi++)
             {
                 publicKeyLeafNodePromises[chainI] = digestChain(HASH_SHA256_NAME, privateKeyPromises[chainI], conf.group.maxPermutationId);
-                chainI++;
-            }
-        }
-
-        // Explicit delta indices
-        for(let gi = 0; gi < conf.numGroups; gi++)
-        {
-            for(let i = 0; i < conf.group.numExplicitDeltaIndices; i++)
-            {
-                publicKeyLeafNodePromises[chainI] = digestChain(HASH_SHA256_NAME, privateKeyPromises[chainI], conf.group.maxDeltaIndex);
                 chainI++;
             }
         }
@@ -634,7 +624,7 @@ async function processGenerateSignatureFormElementsAsync(form)
     }
 
     // Context setup
-    const conf = createSigConfig(numGroups, HASH_SHA256_BIT_LENGTH / 8, numImplicitDeltaIndices * numGroups);
+    const conf = createSigConfig();
     const groups = createSigGroupsBySigConfig(conf, contentHashBuf);
 
     // Create promises for generating private key values (calculated while other independent tasks run)
@@ -678,16 +668,6 @@ async function processGenerateSignatureFormElementsAsync(form)
             }
         }
 
-        // Explicit delta indices
-        for(let gi = 0; gi < conf.numGroups; gi++)
-        {
-            for(let i = conf.group.numImplicitDeltaIndices; i < conf.group.numDeltaIndices; i++)
-            {
-                sigChainValuePromises[chainI] = digestChain(HASH_SHA256_NAME, privateKeyPromises[chainI], conf.group.maxDeltaIndex - groups[gi].deltaIndices[i]);
-                chainI++;
-            }
-        }
-
         // Delta values
         for(let gi = 0; gi < conf.numGroups; gi++)
         {
@@ -711,7 +691,7 @@ async function processGenerateSignatureFormElementsAsync(form)
     const signature = concatenateArrayBuffers(sigChainBufs);
 
     // Done!
-    outputGenerateSignatureValues(signature, conf.numGroups, conf.group.numImplicitDeltaIndices);
+    outputGenerateSignatureValues(signature);
 }
 
 /**
@@ -789,7 +769,7 @@ async function processVerifyFormElementsAsync(form)
     const signatureBufPromise = signatureFile.arrayBuffer();
 
     // Context setup
-    const conf = createSigConfig(numGroups, HASH_SHA256_BIT_LENGTH / 8, numImplicitDeltaIndices * numGroups);
+    const conf = createSigConfig();
     const groups = createSigGroupsBySigConfig(conf, contentHashBuf);
 
     // Calculate chain values
@@ -854,16 +834,6 @@ async function processVerifyFormElementsAsync(form)
             }
         }
 
-        // Explicit delta indices
-        for(let gi = 0; gi < conf.numGroups; gi++)
-        {
-            for(let i = conf.group.numImplicitDeltaIndices; i < conf.group.numDeltaIndices; i++)
-            {
-                derivedPublicKeyLeafNodePromises[chainI] = digestChain(HASH_SHA256_NAME, signatureBufs[chainI], groups[gi].deltaIndices[i]);
-                chainI++;
-            }
-        }
-
         // Delta values
         for(let gi = 0; gi < conf.numGroups; gi++)
         {
@@ -914,10 +884,8 @@ function outputGeneratePublicKeyValues(publicKey)
  * @see processGenerateSignatureFormElementsAsync
  * 
  * @param {ArrayBuffer} signature The signature.
- * @param {Number} numGroups The number of groups used in the signature.
- * @param {Number} numImplicitDeltaIndices The number of implicit delta indices used in the signature.
  */
-function outputGenerateSignatureValues(signature, numGroups, numImplicitDeltaIndices)
+function outputGenerateSignatureValues(signature)
 {
     // Output signature
     const sigTextarea = /** @type {HTMLTextAreaElement} */ (document.getElementById(GENERATE_SIGNATURE_OUTPUT_SIGNATURE_TEXTAREA_ID));
@@ -1134,7 +1102,7 @@ function getDeltaIndices(nums, deltaIndicesDest = null)
 }
 
 /**
- * Calculates the delta values - both explicit and implicit - of a given unsorted array of numbers.
+ * Calculates the delta values of a given unsorted array of numbers.
  * @see getDeltaIndices
  * 
  * @param {NumericArray} nums The unsorted array of numbers.
@@ -1206,13 +1174,13 @@ function calculatePermutationIdFromChoices(choices)
 /**
  * Calculates a permutation ID for an array of delta indices.
  * 
- * This function is used to calculate a permutation ID for a signature's implicit delta indices.
+ * This function is used to calculate a permutation ID for a signature's delta indices.
  * @see getDeltaIndices
  * @see calculatePermutationIdFromChoices
  * 
  * @param {NumericArray} deltaIndices The delta indices to use.
- * @returns {Number} The permutation ID of the implicit delta indices.
- * @throws {RangeError} The number of implicit delta values/indices is greater than the number of delta indices provided.
+ * @returns {Number} The permutation ID of the delta indices.
+ * @throws {RangeError} The number of delta values/indices is greater than the number of delta indices provided.
  */
 function calculatePermutationIdFromDeltaIndices(deltaIndices)
 {
@@ -1471,28 +1439,14 @@ function onError(err)
 /**
  * Creates a new signature configuration object.
  * 
- * @param {Number} numGroups The number of groups.
- * @param {Number} numDeltaIndices The number of delta indices per signature.
- * @param {Number} numImplicitDeltaIndices The number of implicit delta indices per signature.
  * @returns {SigConfig} The signature configuration.
- * @throws {RangeError} The total number of delta indices is not divisible by the number of groups.
- * @throws {RangeError} The total number of implicit delta indices is not divisible by the number of groups.
  */
-function createSigConfig(numGroups, numDeltaIndices, numImplicitDeltaIndices)
+function createSigConfig()
 {
-    if(numDeltaIndices % numGroups !== 0)
-    {
-        throw new RangeError("The total number of delta indices must be divisible by the number of groups!");
-    }
-
-    if(numImplicitDeltaIndices % numGroups !== 0)
-    {
-        throw new RangeError("The total number of implicit delta indices must be divisible by the number of groups!");
-    }
-
     const conf = new SigConfig();
-    conf.numGroups = numGroups;
-    conf.group = createSigGroupConfig(numDeltaIndices / numGroups, numImplicitDeltaIndices / numGroups);
+    conf.numValues = HASH_SHA256_BIT_LENGTH / 8;
+    conf.group = createSigGroupConfig(4);
+    conf.numGroups = conf.numValues / conf.group.numDeltaIndices;
     conf.checksum = createSigChecksumConfig(conf.group.maxChecksum * conf.numGroups);
     conf.numChains =
         conf.group.numChains * conf.numGroups +
@@ -1505,30 +1459,22 @@ function createSigConfig(numGroups, numDeltaIndices, numImplicitDeltaIndices)
  * Creates a new signature group configuration object.
  * 
  * @param {Number} numDeltaIndices The number of delta indices per group.
- * @param {Number} numImplicitDeltaIndices The number of implicit delta indices per group.
  * @returns {SigGroupConfig} The signature group configuration.
  */
-function createSigGroupConfig(numDeltaIndices, numImplicitDeltaIndices)
+function createSigGroupConfig(numDeltaIndices)
 {
     const gconf = new SigGroupConfig();
     gconf.numDeltaIndices = numDeltaIndices;
-    gconf.numImplicitDeltaIndices = numImplicitDeltaIndices;
-    gconf.numExplicitDeltaIndices = gconf.numDeltaIndices - gconf.numImplicitDeltaIndices;
-    gconf.hasPermutationId = gconf.numImplicitDeltaIndices > 1;
     gconf.numChains =
-        gconf.numExplicitDeltaIndices +
+        gconf.numDeltaIndices +
         Number(gconf.hasPermutationId) +
         numDeltaIndices;
 
     gconf.maxDeltaIndex = gconf.numDeltaIndices - 1;
     gconf.maxDeltaValue = 255;
-    gconf.maxPermutationId = factorial(gconf.numImplicitDeltaIndices) - 1;
+    gconf.maxPermutationId = factorial(gconf.numDeltaIndices) - 1;
     gconf.maxChecksum =
         gconf.maxDeltaValue + // Final delta value
-        ( // Sum of largest possible implicit delta indices
-            sumZeroToN(gconf.numImplicitDeltaIndices - 1) +
-            gconf.numExplicitDeltaIndices * gconf.numImplicitDeltaIndices
-        ) +
         gconf.maxPermutationId; // Permutation ID
 
     return gconf;
@@ -1609,10 +1555,9 @@ function populateSigGroupsBySigConfig(config, groups)
     {
         getDeltaIndices(groups[i].values, groups[i].deltaIndices);
         getDeltaValues(groups[i].values, groups[i].deltaIndices, groups[i].deltaValues);
-        groups[i].permutationId = calculatePermutationIdFromDeltaIndices(groups[i].deltaIndices.slice(0, config.group.numImplicitDeltaIndices));
+        groups[i].permutationId = calculatePermutationIdFromDeltaIndices(groups[i].deltaIndices);
         checksum +=
             (config.group.maxDeltaValue - getLargestValue(groups[i].values)) +
-            sumArrayValues(groups[i].deltaIndices, 0, config.group.numImplicitDeltaIndices) +
             (config.group.maxPermutationId - groups[i].permutationId);
 
         if(sumArrayValues(groups[i].deltaIndices, 0, config.group.numDeltaIndices) !== sumZeroToN(config.group.maxDeltaIndex))
@@ -1631,6 +1576,7 @@ function populateSigGroupsBySigConfig(config, groups)
 
 class SigConfig
 {
+    numValues = -1;
     numGroups = -1;
     /** @type {SigGroupConfig} */
     group = (/** @type {SigGroupConfig} */ (/** @type {any} */ null));
@@ -1643,8 +1589,6 @@ class SigConfig
 class SigGroupConfig
 {
     numDeltaIndices = -1;
-    numExplicitDeltaIndices = -1;
-    numImplicitDeltaIndices = -1;
     hasPermutationId = false;
     numChains = -1;
 
