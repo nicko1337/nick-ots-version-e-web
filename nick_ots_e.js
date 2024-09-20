@@ -1,3 +1,4 @@
+/// <reference types="@webgpu/types" />
 "use strict";
 
 // TODO: Consider mixing in some extra data regarding the parameter set (PRF, maybe more?).
@@ -44,9 +45,264 @@ const GENERATE_SIGNATURE_OUTPUT_SIGNATURE_ANCHOR_DOWNLOAD_PATTERN_CONTENT_HASH_R
 /** @type {DigestAlgo} */
 const HASH_SHA256_NAME = "SHA-256";
 const HASH_SHA256_BIT_LENGTH = 256;
+const HASH_SHA256_BLOCK_BIT_LENGTH = 512;
+
+const MAX_ACCEPTABLE_NUMBER_OF_GPU_DEVICE_LOSSES = 3;
+
+const COMPUTE_SHADER_MODULE_LABEL = "Hash chain shader";
+const COMPUTE_SHADER_MODULE_CODE = `
+struct ChainProcess {
+    numRequests: u32,
+    requests: array<ChainRequest>
+}
+
+struct ChainRequest {
+    n: u32,
+    message: array<u32, 8>
+}
+
+@group(0) @binding(0) var<storage, read> input:ChainProcess;
+@group(0) @binding(1) var<storage, read_write> hashes:array<array<u32, 8>>;
+
+const k = array<u32, 64>(
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+);
+
+const hashInit = array<u32, 8>(
+    0x6a09e667,
+    0xbb67ae85,
+    0x3c6ef372,
+    0xa54ff53a,
+    0x510e527f,
+    0x9b05688c,
+    0x1f83d9ab,
+    0x5be0cd19
+);
+
+@compute @workgroup_size(65)
+fn main(@builtin(local_invocation_index) i: u32) {
+    if(i >= input.numRequests) {
+        return;
+    }
+
+    let req: ChainRequest = input.requests[i];
+    sha256Chain(req.message, req.n, &(hashes[i]));
+}
+
+fn sha256Chain(
+    message: array<u32, 8>,
+    n: u32,
+    hash: ptr<storage, array<u32, 8>, read_write>
+) {
+    var a = message;
+    var b = array<u32, 8>();
+
+    swapMessageEndianness(&a);
+
+    // Chain
+    for(var i: u32 = 0; i < n; i++) {
+        sha256_oneBlock(&a, &b);
+        a = b;
+    }
+
+    for(var i: u32 = 0; i < 8; i++) {
+        (*hash)[i] = swapUint32Endianness(a[i]);
+    }
+}
+
+fn sha256_oneBlock(
+    message: ptr<function, array<u32, 8>>,
+    hash: ptr<function, array<u32, 8>>
+) {
+    var messageSched = array<u32, 64>();
+
+    var a: u32 = hashInit[0];
+    var b: u32 = hashInit[1];
+    var c: u32 = hashInit[2];
+    var d: u32 = hashInit[3];
+    var e: u32 = hashInit[4];
+    var f: u32 = hashInit[5];
+    var g: u32 = hashInit[6];
+    var h: u32 = hashInit[7];
+
+    for(var i: u32 = 0; i < 8; i++) {
+        (*hash)[i] = hashInit[i];
+    }
+
+    for(var t: u32 = 0; t < 8; t++) {
+        messageSched[t] = (*message)[t];
+    }
+
+    messageSched[8] = 0x80000000;
+    messageSched[15] = 256;
+
+    for(var t: u32 = 16; t < 64; t++) {
+        messageSched[t] =
+            sigmaLower1(messageSched[t-2]) +
+            messageSched[t-7] +
+            sigmaLower0(messageSched[t-15]) +
+            messageSched[t-16];
+    }
+
+    for(var t = 0; t < 64; t++) {
+        let temp1 =
+            h +
+            sigmaUpper1(e) +
+            ch(e, f, g) +
+            k[t] +
+            messageSched[t];
+
+        let temp2 =
+            sigmaUpper0(a) +
+            maj(a, b, c);
+
+        h = g;
+        g = f;
+        f = e;
+        e = d + temp1;
+        d = c;
+        c = b;
+        b = a;
+        a = temp1 + temp2;
+    }
+
+    (*hash)[0] += a;
+    (*hash)[1] += b;
+    (*hash)[2] += c;
+    (*hash)[3] += d;
+    (*hash)[4] += e;
+    (*hash)[5] += f;
+    (*hash)[6] += g;
+    (*hash)[7] += h;
+}
+
+fn ch(x: u32, y: u32, z: u32) -> u32 {
+    return (x & y) ^ (~x & z);
+}
+
+fn maj(x: u32, y: u32, z: u32) -> u32 {
+    return (x & y) ^ (x & z) ^ (y & z);
+}
+
+fn rotr(x: u32, n: u32) -> u32 {
+    return (x >> n) | (x << (32 - n));
+}
+
+fn sigmaUpper0(x: u32) -> u32 {
+    return rotr(x, 2) ^ rotr(x, 13) ^ rotr(x, 22);
+}
+
+fn sigmaUpper1(x: u32) -> u32 {
+    return rotr(x, 6) ^ rotr(x, 11) ^ rotr(x, 25);
+}
+
+fn sigmaLower0(x: u32) -> u32 {
+    return rotr(x, 7) ^ rotr(x, 18) ^ (x >> 3);
+}
+
+fn sigmaLower1(x: u32) -> u32 {
+    return rotr(x, 17) ^ rotr(x, 19) ^ (x >> 10);
+}
+
+fn swapUint32Endianness(num: u32) -> u32 {
+    return (
+        ((num >> 24) & 0x000000ff) |
+        ((num >> 8)  & 0x0000ff00) |
+        ((num << 8)  & 0x00ff0000) |
+        ((num << 24) & 0xff000000)
+    );
+}
+
+fn swapMessageEndianness(message: ptr<function, array<u32, 8>>) {
+    for(var i: i32 = 0; i < 8; i++) {
+        let word = (*message)[i];
+        (*message)[i] =
+            ((word >> 24) & 0x000000ff) |
+            ((word >> 8)  & 0x0000ff00) |
+            ((word << 8)  & 0x00ff0000) |
+            ((word << 24) & 0xff000000);
+    }
+}`;
+
+const COMPUTE_SHADER_PIPELINE_LABEL = "Hash chain pipeline";
+
+const COMPUTE_SHADER_ENTRYPOINT_NAME = "main";
+
+const COMPUTE_SHADER_DISPATCH_X = 1;
+const COMPUTE_SHADER_DISPATCH_Y = 1;
+const COMPUTE_SHADER_DISPATCH_Z = 1;
+
+const COMPUTE_SHADER_WORKGROUP_SIZE = 65;
+
+const COMPUTE_SHADER_HASH_BYTE_LENGTH = (HASH_SHA256_BIT_LENGTH / 8);
+
+const COMPUTE_SHADER_STRUCT_CHAIN_REQUEST_N_BYTE_LENGTH = 4;
+const COMPUTE_SHADER_STRUCT_CHAIN_REQUEST_BYTE_LENGTH =
+    COMPUTE_SHADER_STRUCT_CHAIN_REQUEST_N_BYTE_LENGTH +
+    COMPUTE_SHADER_HASH_BYTE_LENGTH;
+
+const COMPUTE_SHADER_STRUCT_CHAIN_PROCESS_NUM_REQUESTS_BYTE_LENGTH = 4;
+const COMPUTE_SHADER_STRUCT_CHAIN_PROCESS_REQUESTS_BYTE_LENGTH =
+    COMPUTE_SHADER_STRUCT_CHAIN_REQUEST_BYTE_LENGTH * COMPUTE_SHADER_WORKGROUP_SIZE;
+const COMPUTE_SHADER_STRUCT_CHAIN_PROCESS_BYTE_LENGTH =
+    COMPUTE_SHADER_STRUCT_CHAIN_PROCESS_NUM_REQUESTS_BYTE_LENGTH +
+    COMPUTE_SHADER_STRUCT_CHAIN_PROCESS_REQUESTS_BYTE_LENGTH;
+
+const COMPUTE_SHADER_GROUP0_LABEL = "Binding group 0";
+
+const COMPUTE_SHADER_GROUP0_BUFFER_INPUT_LABEL = "Input buffer";
+const COMPUTE_SHADER_GROUP0_BUFFER_INPUT_PROCESS_BINDING = 0;
+
+const COMPUTE_SHADER_GROUP0_BUFFER_OUTPUT_LABEL = "Output buffer";
+const COMPUTE_SHADER_GROUP0_BUFFER_OUTPUT_HASHES_BINDING = 1;
+
+const COMPUTE_SHADER_GROUP0_BUFFER_OUTPUT_HASHES_BYTE_LENGTH =
+    COMPUTE_SHADER_HASH_BYTE_LENGTH * COMPUTE_SHADER_WORKGROUP_SIZE;
+
+const COMPUTE_SHADER_BUFFER_OUTPUT2_LABEL = "Mappable output buffer";
+const COMPUTE_SHADER_BUFFER_OUTPUT2_HASHES_BYTE_LENGTH = COMPUTE_SHADER_GROUP0_BUFFER_OUTPUT_HASHES_BYTE_LENGTH;
 
 // Misc.
 const HEX_ALPHABET_LOWERCASE = "0123456789abcdef";
+
+/** @type {GPUAdapter|null} */
+let gpuAdapter = null;
+/** @type {GPUDevice|null} */
+let gpuDevice = null;
+
+/** @type {GPUComputePipeline|null} */
+let gpuComputePipeline = null;
+/** @type {GPUBindGroup|null} */
+let gpuComputeBindGroup0 = null;
+
+/** @type {GPUBuffer|null} */
+let gpuGroup0_buffer_input_gpuBuffer = null;
+/** @type {ArrayBuffer|null} */
+let gpuGroup0_buffer_input_arrayBuffer = null;
+/** @type {DataView|null} */
+let gpuGroup0_buffer_input_dataView = null;
+let gpuGroup0_buffer_input_process_offset = -1;
+let gpuGroup0_buffer_input_process_numRequests_offset = -1;
+let gpuGroup0_buffer_input_process_requests_offset = -1;
+
+/** @type {GPUBuffer|null} */
+let gpuGroup0_buffer_output_gpuBuffer = null;
+let gpuGroup0_buffer_output_hashes_offset = -1;
+
+/** @type {GPUBuffer|null} */
+let gpu_buffer_output2_gpuBuffer = null;
+/** @type {Promise<void>|null} */
+let gpu_buffer_output2_mapAsync_promise = null;
+let gpu_buffer_output2_hashes_offset = -1;
+
+let gpuNumDeviceLosses = 0;
 
 /** @type {Number} */
 let TEMP_digestOpCount = 0; // TODO: Remove
@@ -246,7 +502,369 @@ function onDOMContentLoadedEvent()
         throw new Error("Security features are unavailable.");
     }
 
-    initForms();
+    if(typeof navigator.gpu !== "object" || !navigator.gpu)
+    {
+        throw new Error("GPU computation is unavailable.");
+    }
+
+    initWebGpuAsync()
+        .then(initForms)
+        .catch(onError);
+}
+
+/**
+ * Asynchronously initializes WebGPU functionality.
+ * 
+ * @returns {Promise<void>} A promise that resolves when WebGPU functionality has been initialized.
+ */
+async function initWebGpuAsync()
+{
+    gpuAdapter = await navigator.gpu.requestAdapter();
+
+    if(!gpuAdapter)
+    {
+        throw new Error("GPU access is not available.");
+    }
+
+    gpuDevice = await gpuAdapter.requestDevice();
+    gpuDevice.lost.finally(onWebGpuDeviceLost);
+    await initWebGpuComputeShaderAsync(gpuDevice);
+}
+
+/**
+ * Handles the WebGPU device being lost.
+ */
+function onWebGpuDeviceLost()
+{
+    gpuDevice = null;
+    gpuNumDeviceLosses++;
+
+    if(gpuNumDeviceLosses >= MAX_ACCEPTABLE_NUMBER_OF_GPU_DEVICE_LOSSES)
+    {
+        return;
+    }
+
+    const oldPromise = gpu_buffer_output2_mapAsync_promise;
+    gpu_buffer_output2_mapAsync_promise = initWebGpuAsync()
+        .catch(onError);
+
+    if(oldPromise)
+    {
+        gpu_buffer_output2_mapAsync_promise = gpu_buffer_output2_mapAsync_promise.then(() => oldPromise);
+    }
+}
+
+/**
+ * Asynchronously initializes the WebGPU compute shader for computing hash chains.
+ * 
+ * @param {GPUDevice} device The GPU device to use.
+ */
+async function initWebGpuComputeShaderAsync(device)
+{
+    const shaderModule = device.createShaderModule({
+        label: COMPUTE_SHADER_MODULE_LABEL,
+        code: COMPUTE_SHADER_MODULE_CODE
+    });
+
+    const pipelinePromise = device.createComputePipelineAsync({
+        label: COMPUTE_SHADER_PIPELINE_LABEL,
+        layout: "auto", // TODO: Replace?
+        compute: {
+            entryPoint: COMPUTE_SHADER_ENTRYPOINT_NAME,
+            module: shaderModule
+        }
+    });
+
+    initWebGpuComputeShaderBuffers(device);
+    gpuComputePipeline = await pipelinePromise;
+    gpuComputeBindGroup0 = device.createBindGroup({
+        label: COMPUTE_SHADER_GROUP0_LABEL,
+        layout: gpuComputePipeline.getBindGroupLayout(0),
+        entries: [
+            {
+                binding: COMPUTE_SHADER_GROUP0_BUFFER_INPUT_PROCESS_BINDING,
+                resource: {
+                    buffer: /** @type {GPUBuffer} */ (gpuGroup0_buffer_input_gpuBuffer),
+                    offset: gpuGroup0_buffer_input_process_offset,
+                    size: COMPUTE_SHADER_STRUCT_CHAIN_PROCESS_BYTE_LENGTH
+                }
+            },
+            {
+                binding: COMPUTE_SHADER_GROUP0_BUFFER_OUTPUT_HASHES_BINDING,
+                resource: {
+                    buffer: /** @type {GPUBuffer} */ (gpuGroup0_buffer_output_gpuBuffer),
+                    offset: gpuGroup0_buffer_output_hashes_offset,
+                    size: COMPUTE_SHADER_GROUP0_BUFFER_OUTPUT_HASHES_BYTE_LENGTH
+                }
+            }
+        ]
+    });
+}
+
+/**
+ * Creates a new array of command buffers for the WebGPU compute shader.
+ * 
+ * @param {Number} numHashes The number of hashes to compute.
+ * @returns {GPUCommandBuffer[]} An array of command buffers.
+ */
+function createWebGpuComputeShaderCommandBuffers(numHashes)
+{
+    const encoder = (/** @type {GPUDevice} */ (gpuDevice)).createCommandEncoder();
+    const pass = encoder.beginComputePass();
+
+    pass.setPipeline(/** @type {GPUComputePipeline} */ (gpuComputePipeline));
+    pass.setBindGroup(0, gpuComputeBindGroup0);
+    pass.dispatchWorkgroups(COMPUTE_SHADER_DISPATCH_X, COMPUTE_SHADER_DISPATCH_Y, COMPUTE_SHADER_DISPATCH_Z);
+    pass.end();
+    encoder.copyBufferToBuffer(
+        /** @type {GPUBuffer} */ (gpuGroup0_buffer_output_gpuBuffer),
+        gpuGroup0_buffer_output_hashes_offset,
+        /** @type {GPUBuffer} */ (gpu_buffer_output2_gpuBuffer), 
+        gpu_buffer_output2_hashes_offset,
+        COMPUTE_SHADER_HASH_BYTE_LENGTH * numHashes
+    );
+
+    return [ encoder.finish() ];
+}
+
+/**
+ * Initializes the buffers for the WebGPU compute shader.
+ * 
+ * @param {GPUDevice} device The GPU device to use.
+ */
+function initWebGpuComputeShaderBuffers(device)
+{
+    initWebGpuComputeShaderGroup0Buffers(device);
+    initWebGpuComputeShaderOutput2Buffer(device);
+}
+
+/**
+ * Initializes the buffers for group 0 of the WebGPU compute shader.
+ * 
+ * @param {GPUDevice} device The GPU device to use.
+ */
+function initWebGpuComputeShaderGroup0Buffers(device)
+{
+    initWebGpuComputeShaderGroup0InputBuffer(device);
+    initWebGpuComputeShaderGroup0OutputBuffer(device);
+}
+
+/**
+ * Initializes the input buffer for group 0 of the WebGPU compute shader.
+ * 
+ * @param {GPUDevice} device The GPU device to use.
+ */
+function initWebGpuComputeShaderGroup0InputBuffer(device)
+{
+    let offset = 0;
+
+    offset = calculateAlignedAddress(offset, device.limits.minStorageBufferOffsetAlignment);
+    gpuGroup0_buffer_input_process_offset = offset;
+
+    // Values in struct
+    {
+        gpuGroup0_buffer_input_process_numRequests_offset = offset;
+        offset += COMPUTE_SHADER_STRUCT_CHAIN_PROCESS_NUM_REQUESTS_BYTE_LENGTH;
+
+        gpuGroup0_buffer_input_process_requests_offset = offset;
+        offset += COMPUTE_SHADER_STRUCT_CHAIN_PROCESS_REQUESTS_BYTE_LENGTH;
+    }
+
+    // Don't create a new array buffer if we already have one (e.g. after losing a previous GPU device)
+    if(!gpuGroup0_buffer_input_arrayBuffer)
+    {
+        gpuGroup0_buffer_input_arrayBuffer = new ArrayBuffer(offset);
+    }
+
+    gpuGroup0_buffer_input_dataView = new DataView(gpuGroup0_buffer_input_arrayBuffer);
+
+    gpuGroup0_buffer_input_gpuBuffer = device.createBuffer({
+        label: COMPUTE_SHADER_GROUP0_BUFFER_INPUT_LABEL,
+        size: gpuGroup0_buffer_input_arrayBuffer.byteLength,
+        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE
+    });
+}
+
+/**
+ * Initializes the output buffer for group 0 of the WebGPU compute shader.
+ * 
+ * @param {GPUDevice} device The GPU device to use.
+ */
+function initWebGpuComputeShaderGroup0OutputBuffer(device)
+{
+    let offset = 0;
+
+    offset = calculateAlignedAddress(offset, device.limits.minStorageBufferOffsetAlignment);
+    gpuGroup0_buffer_output_hashes_offset = offset;
+    offset += COMPUTE_SHADER_GROUP0_BUFFER_OUTPUT_HASHES_BYTE_LENGTH;
+
+    gpuGroup0_buffer_output_gpuBuffer = device.createBuffer({
+        label: COMPUTE_SHADER_GROUP0_BUFFER_OUTPUT_LABEL,
+        size: offset,
+        usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.STORAGE
+    });
+}
+
+/**
+ * Initializes the mappable output buffer for the WebGPU compute shader.
+ * 
+ * @param {GPUDevice} device The GPU device to use.
+ */
+function initWebGpuComputeShaderOutput2Buffer(device)
+{
+    let offset = 0;
+
+    gpu_buffer_output2_hashes_offset = offset;
+    offset += COMPUTE_SHADER_BUFFER_OUTPUT2_HASHES_BYTE_LENGTH;
+
+    gpu_buffer_output2_gpuBuffer = device.createBuffer({
+        label: COMPUTE_SHADER_BUFFER_OUTPUT2_LABEL,
+        size: offset,
+        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
+    });
+}
+
+/**
+ * Sets the next messages and N-values of the WebGPU compute shader.
+ * 
+ * Note that this does not update the buffer that is used by the GPU.
+ * 
+ * @see mapWebGpuComputeShaderGroup0InputBuffer
+ * @see runWebGpuComputeShaderAsync
+ * 
+ * @param {ArrayBuffer[]} bufs Promises that resolve to message buffers.
+ * @param {Number[]} nValues The N-values of the corresponding message buffers.
+ */
+function setWebGpuComputeShaderGroup0InputProcessValues(bufs, nValues)
+{
+    (/** @type {DataView} */ (gpuGroup0_buffer_input_dataView)).setUint32(gpuGroup0_buffer_input_process_numRequests_offset, bufs.length, true);
+
+    for(let i = 0, offset = gpuGroup0_buffer_input_process_requests_offset; i < bufs.length; i++)
+    {
+        (/** @type {DataView} */ (gpuGroup0_buffer_input_dataView)).setUint32(offset, nValues[i], true);
+        offset += COMPUTE_SHADER_STRUCT_CHAIN_REQUEST_N_BYTE_LENGTH;
+
+        copyBufferToBuffer(bufs[i], 0, /** @type {ArrayBuffer} */ (gpuGroup0_buffer_input_arrayBuffer), offset, COMPUTE_SHADER_HASH_BYTE_LENGTH);
+        offset += COMPUTE_SHADER_HASH_BYTE_LENGTH;
+    }
+}
+
+/**
+ * Sends the current contents of input array buffer to the corresponding WebGPU buffer.
+ * 
+ * @see setWebGpuComputeShaderGroup0InputProcessValues
+ * @see runWebGpuComputeShaderAsync
+ * 
+ * @param {Number} numHashes The number of hashes to compute.
+ */
+function mapWebGpuComputeShaderGroup0InputBuffer(numHashes)
+{
+    const byteLength =
+        COMPUTE_SHADER_STRUCT_CHAIN_PROCESS_NUM_REQUESTS_BYTE_LENGTH +
+        COMPUTE_SHADER_STRUCT_CHAIN_REQUEST_BYTE_LENGTH * numHashes;
+
+    (/** @type {GPUDevice} */ (gpuDevice)).queue.writeBuffer(
+        /** @type {GPUBuffer} */ (gpuGroup0_buffer_input_gpuBuffer),
+        gpuGroup0_buffer_input_process_numRequests_offset,
+        /** @type {ArrayBuffer} */ (gpuGroup0_buffer_input_arrayBuffer),
+        gpuGroup0_buffer_input_process_numRequests_offset,
+        byteLength
+    );
+}
+
+/**
+ * Runs the WebGPU compute shader to compute a value in a hash chain.
+ * 
+ * @see setWebGpuComputeShaderGroup0InputMessage
+ * @see setWebGpuComputeShaderGroup0InputN
+ * 
+ * @param {Promise<ArrayBuffer>[]} bufPromises Promises that resolve to message buffers.
+ * @param {Number[]} nValues The N-values of the corresponding message buffers.
+ * @returns {Promise<ArrayBuffer>} The resulting array buffer, where each hash is in sequential order.
+ * @throws {ReferenceError} The GPU device has been lost and could not be recovered.
+ */
+async function runWebGpuComputeShaderAsync(bufPromises, nValues)
+{
+    while(gpu_buffer_output2_mapAsync_promise)
+    {
+        await gpu_buffer_output2_mapAsync_promise; // Wait for any pending computations to finish.
+    }
+
+    const bufs = await Promise.all(bufPromises);
+    const numBufs = bufs.length; // For early GC of buffers
+    assertWebGpuDeviceAvailability();
+    setWebGpuComputeShaderGroup0InputProcessValues(bufs, nValues);
+    mapWebGpuComputeShaderGroup0InputBuffer(numBufs);
+    const cmdBufs = createWebGpuComputeShaderCommandBuffers(numBufs);
+    (/** @type {GPUDevice} */ (gpuDevice)).queue.submit(cmdBufs);
+
+    gpu_buffer_output2_mapAsync_promise = (/** @type {GPUBuffer} */ (gpu_buffer_output2_gpuBuffer)).mapAsync(
+        GPUMapMode.READ,
+        gpu_buffer_output2_hashes_offset,
+        COMPUTE_SHADER_HASH_BYTE_LENGTH * numBufs
+    );
+    assertWebGpuDeviceAvailability();
+    await gpu_buffer_output2_mapAsync_promise;
+    gpu_buffer_output2_mapAsync_promise = null;
+
+    const hashes = (/** @type {GPUBuffer} */ (gpu_buffer_output2_gpuBuffer)).getMappedRange(
+        gpu_buffer_output2_hashes_offset,
+        COMPUTE_SHADER_HASH_BYTE_LENGTH * numBufs
+    ).slice(0);
+
+    (/** @type {GPUBuffer} */ (gpu_buffer_output2_gpuBuffer)).unmap();
+    assertWebGpuDeviceAvailability();
+    return hashes;
+}
+
+/**
+ * Asserts that the WebGPU device is available.
+ * 
+ * @throws {ReferenceError} The GPU device has been lost.
+ */
+function assertWebGpuDeviceAvailability()
+{
+    if(!gpuDevice)
+    {
+        throw new ReferenceError("The GPU is unavailable.");
+    }
+}
+
+/**
+ * Calculates the lowest-possible address that is aligned to a given number of bytes.
+ * 
+ * @param {Number} minAddr The lowest address that can be returned by this function.
+ * @param {Number} alignTo The number of bytes to align the address to.
+ * @returns {Number} The address, which is no lower than `minAddr` and is aligned to a size of `alignTo` bytes.
+ * @throws {RangeError} The given minimum address is a negative integer.
+ * @throws {RangeError} The given alignment size is a non-positive integer.
+ * @throws {TypeError} The given minimum address is not an integer.
+ * @throws {TypeError} The given alignment size is not an integer.
+ */
+function calculateAlignedAddress(minAddr, alignTo)
+{
+    if(!Number.isInteger(minAddr))
+    {
+        throw new TypeError("Minimum address is not an integer!");
+    }
+
+    if(minAddr < 0)
+    {
+        throw new RangeError("Minimum address is negative!");
+    }
+
+    if(!Number.isInteger(alignTo))
+    {
+        throw new TypeError("Alignment size is not an integer!");
+    }
+
+    if(alignTo < 1)
+    {
+        throw new RangeError("Alignment size is not positive!");
+    }
+
+    const mod = minAddr % alignTo;
+    return (mod === 0) ? minAddr : (minAddr + alignTo - mod);
 }
 
 /**
@@ -514,29 +1132,29 @@ async function processGeneratePublicKeyFormElementsAsync(form)
     let publicKeyBuf = null;
 
     {
-        const publicKeyLeafNodePromises =
-            /** @type {(Promise<ArrayBuffer>|null)[]} */
+        const chainNValues =
+            /** @type {number[]} */
             (
                 (
                     /** @type {any[]} */
                     (privateKeyPromises)
                 )
                 .slice()
-                .fill(null)
+                .fill(-1)
             );
         let chainI = 0;
 
         // Checksum
         for(let cni = 0; cni < conf.checksum.numNumerals; cni++)
         {
-            publicKeyLeafNodePromises[chainI] = digestChain(HASH_SHA256_NAME, privateKeyPromises[chainI], conf.checksum.maxNumeralValue);
+            chainNValues[chainI] = conf.checksum.maxNumeralValue;
             chainI++;
         }
 
         // Permutation ID
         for(let gi = 0; gi < conf.numGroups; gi++)
         {
-            publicKeyLeafNodePromises[chainI] = digestChain(HASH_SHA256_NAME, privateKeyPromises[chainI], conf.group.maxPermutationId);
+            chainNValues[chainI] = conf.group.maxPermutationId;
             chainI++;
         }
 
@@ -545,7 +1163,7 @@ async function processGeneratePublicKeyFormElementsAsync(form)
         {
             for(let i = 0; i < conf.group.numValues; i++)
             {
-                publicKeyLeafNodePromises[chainI] = digestChain(HASH_SHA256_NAME, privateKeyPromises[chainI], conf.group.maxDeltaValue);
+                chainNValues[chainI] = conf.group.maxDeltaValue;
                 chainI++;
             }
         }
@@ -556,7 +1174,24 @@ async function processGeneratePublicKeyFormElementsAsync(form)
             throw new Error("Incorrect number of chains!");
         }
 
-        publicKeyBuf = await calculateMerkleTreeRootFromLeafNodePromises(HASH_SHA256_NAME, /** @type {Promise<ArrayBuffer>[]} */ (publicKeyLeafNodePromises));
+        const chainEndpointsBuf = await digestChains(HASH_SHA256_NAME, privateKeyPromises, chainNValues);
+        const chainEndpoints =
+            /** @type {(Promise<ArrayBuffer>|null)[]} */
+            (
+                (
+                    /** @type {any[]} */
+                    (chainNValues)
+                )
+                .slice()
+                .fill(null)
+            );
+
+        for(let i = 0, offset = 0; i < chainEndpoints.length; i++, offset += (HASH_SHA256_BIT_LENGTH / 8))
+        {
+            chainEndpoints[i] = Promise.resolve(chainEndpointsBuf.slice(offset, offset + (HASH_SHA256_BIT_LENGTH / 8)));
+        }
+
+        publicKeyBuf = await calculateMerkleTreeRootFromLeafNodePromises(HASH_SHA256_NAME, /** @type {Promise<ArrayBuffer>[]} */ (chainEndpoints));
     }
 
     // Done!
@@ -637,19 +1272,19 @@ async function processGenerateSignatureFormElementsAsync(form)
     const checksum = populateSigGroupsBySigConfig(conf, groups);
 
     // Generate Merkle trees and obtain the signature
-    /** @type {ArrayBuffer[]|null} */
-    let sigChainBufs = null;
+    /** @type {ArrayBuffer|null} */
+    let signature = null;
 
     {
-        const sigChainValuePromises =
-            /** @type {(Promise<ArrayBuffer>|null)[]} */
+        const chainNValues =
+            /** @type {number[]} */
             (
                 (
                     /** @type {any[]} */
                     (privateKeyPromises)
                 )
                 .slice()
-                .fill(null)
+                .fill(-1)
             );
         let chainI = 0;
 
@@ -657,14 +1292,14 @@ async function processGenerateSignatureFormElementsAsync(form)
         for(let i = 0, shift = 0; i < conf.checksum.numNumerals; i++, shift += conf.checksum.numeralBaseLog2)
         {
             const numeral = (checksum >>> shift) & conf.checksum.maxNumeralValue;
-            sigChainValuePromises[chainI] = digestChain(HASH_SHA256_NAME, privateKeyPromises[chainI], conf.checksum.maxNumeralValue - numeral);
+            chainNValues[chainI] = conf.checksum.maxNumeralValue - numeral;
             chainI++;
         }
 
         // Permutation ID
         for(let gi = 0; gi < conf.numGroups; gi++)
         {
-            sigChainValuePromises[chainI] = digestChain(HASH_SHA256_NAME, privateKeyPromises[chainI], conf.group.maxPermutationId - groups[gi].permutationId);
+            chainNValues[chainI] = conf.group.maxPermutationId - groups[gi].permutationId;
             chainI++;
         }
 
@@ -673,7 +1308,7 @@ async function processGenerateSignatureFormElementsAsync(form)
         {
             for(let i = 0; i < conf.group.numValues; i++)
             {
-                sigChainValuePromises[chainI] = digestChain(HASH_SHA256_NAME, privateKeyPromises[chainI], conf.group.maxDeltaValue - groups[gi].deltaValues[i]);
+                chainNValues[chainI] = conf.group.maxDeltaValue - groups[gi].deltaValues[i];
                 chainI++;
             }
         }
@@ -684,11 +1319,8 @@ async function processGenerateSignatureFormElementsAsync(form)
             throw new Error("Incorrect number of chains!");
         }
 
-        sigChainBufs = await Promise.all(/** @type {Promise<ArrayBuffer>[]} */ (sigChainValuePromises)); // These promises should already have resolved, so there's practically no performance penalty.
+        signature = await digestChains(HASH_SHA256_NAME, privateKeyPromises, chainNValues); // These promises should already have resolved, so there's practically no performance penalty.
     }
-
-    // Concatenate the signature hashes into one buffer
-    const signature = concatenateArrayBuffers(sigChainBufs);
 
     // Done!
     outputGenerateSignatureValues(signature, contentHashBuf);
@@ -776,8 +1408,8 @@ async function processVerifyFormElementsAsync(form)
     const checksum = populateSigGroupsBySigConfig(conf, groups);
 
     // Validate signature in input form
-    /** @type {ArrayBuffer[]} */
-    let signatureBufs = [ ];
+    /** @type {Promise<ArrayBuffer>[]} */
+    let signatureBufPromises = [ ];
 
     try
     {
@@ -790,7 +1422,7 @@ async function processVerifyFormElementsAsync(form)
 
         for(let i = 0; i < signatureBuf.byteLength; i += (HASH_SHA256_BIT_LENGTH / 8))
         {
-            signatureBufs.push(signatureBuf.slice(i, i + (HASH_SHA256_BIT_LENGTH / 8)));
+            signatureBufPromises.push(Promise.resolve(signatureBuf.slice(i, i + (HASH_SHA256_BIT_LENGTH / 8))));
         }
     }
     catch(err)
@@ -804,15 +1436,15 @@ async function processVerifyFormElementsAsync(form)
     let derivedPublicKeyBuf = null;
 
     {
-        const derivedPublicKeyLeafNodePromises =
-            /** @type {(Promise<ArrayBuffer>|null)[]} */
+        const chainNValues =
+            /** @type {number[]} */
             (
                 (
                     /** @type {any[]} */
-                    (signatureBufs)
+                    (signatureBufPromises)
                 )
                 .slice()
-                .fill(null)
+                .fill(-1)
             );
         let chainI = 0;
 
@@ -820,14 +1452,14 @@ async function processVerifyFormElementsAsync(form)
         for(let i = 0, shift = 0; i < conf.checksum.numNumerals; i++, shift += conf.checksum.numeralBaseLog2)
         {
             const numeral = (checksum >>> shift) & conf.checksum.maxNumeralValue;
-            derivedPublicKeyLeafNodePromises[chainI] = digestChain(HASH_SHA256_NAME, signatureBufs[chainI], numeral);
+            chainNValues[chainI] = numeral;
             chainI++;
         }
 
         // Permutation ID
         for(let gi = 0; gi < conf.numGroups; gi++)
         {
-            derivedPublicKeyLeafNodePromises[chainI] = digestChain(HASH_SHA256_NAME, signatureBufs[chainI], groups[gi].permutationId);
+            chainNValues[chainI] = groups[gi].permutationId;
             chainI++;
         }
 
@@ -836,7 +1468,7 @@ async function processVerifyFormElementsAsync(form)
         {
             for(let i = 0; i < conf.group.numValues; i++)
             {
-                derivedPublicKeyLeafNodePromises[chainI] = digestChain(HASH_SHA256_NAME, signatureBufs[chainI], groups[gi].deltaValues[i]);
+                chainNValues[chainI] = groups[gi].deltaValues[i];
                 chainI++;
             }
         }
@@ -847,7 +1479,24 @@ async function processVerifyFormElementsAsync(form)
             throw new Error("Incorrect number of chains!");
         }
 
-        derivedPublicKeyBuf = await calculateMerkleTreeRootFromLeafNodePromises(HASH_SHA256_NAME, /** @type {Promise<ArrayBuffer>[]} */ (derivedPublicKeyLeafNodePromises));
+        const chainEndpointsBuf = await digestChains(HASH_SHA256_NAME, /** @type {Promise<ArrayBuffer>[]} */ (signatureBufPromises), chainNValues);
+        const chainEndpoints =
+            /** @type {(Promise<ArrayBuffer>|null)[]} */
+            (
+                (
+                    /** @type {any[]} */
+                    (chainNValues)
+                )
+                .slice()
+                .fill(null)
+            );
+
+        for(let i = 0, offset = 0; i < chainEndpoints.length; i++, offset += (HASH_SHA256_BIT_LENGTH / 8))
+        {
+            chainEndpoints[i] = Promise.resolve(chainEndpointsBuf.slice(offset, offset + (HASH_SHA256_BIT_LENGTH / 8)));
+        }
+
+        derivedPublicKeyBuf = await calculateMerkleTreeRootFromLeafNodePromises(HASH_SHA256_NAME, /** @type {Promise<ArrayBuffer>[]} */ (chainEndpoints));
     }
 
     // Done!
@@ -940,33 +1589,33 @@ async function digest(algo, buf)
 }
 
 /**
- * Recursively computes a hash digest of a given message a given number of times.
+ * Recursively computes the hash digests of given messages a given number of times.
  * 
  * For example, a hash digest that is recursively computed two times is `H(H(buf))`.
  * 
- * The buffer that is returned is always new. If `n` is less than 1, a copy of `buf` will be returned.
+ * The buffers that are returned are always new. If `n` is less than 1, a copy of `buf` will be returned.
  * 
  * @param {DigestAlgo} algo The hash digest algorithm to use.
- * @param {ArrayBuffer|Promise<ArrayBuffer>} buf The message to digest, or a promise that resolves to the message to digest.
- * @param {Number} n The number of times to recursively compute the hash digest.
- * @returns {Promise<ArrayBuffer>} A promise that resolves to a recursively-computed hash digest of the given message.
+ * @param {Promise<ArrayBuffer>[]} bufs An array of promises that each resolve to a corresponding message to digest.
+ * @param {Number[]} nValues An array containing the number of times to recursively compute the corresponding hash digest.
+ * @returns {Promise<ArrayBuffer>} A promise that resolves to an array buffer that contains the recursively-computed hash digests of the given messages.
+ * @throws {RangeError} The number of messages and N values do not match.
+ * @throws {TypeError} The given hash digest algorithm `algo` is not supported.
  */
-async function digestChain(algo, buf, n)
+async function digestChains(algo, bufs, nValues)
 {
-    buf = /** @type {ArrayBuffer} */ (await buf);
-
-    if(n < 1)
+    if(algo !== HASH_SHA256_NAME)
     {
-        return buf.slice(0);
+        throw new TypeError("Invalid hash digest algorithm!");
     }
 
-    while(n > 0)
+    if(bufs.length !== nValues.length)
     {
-        buf = await digest(algo, buf);
-        n--;
+        throw new RangeError("Unequal number of messages and N-values!");
     }
 
-    return buf;
+    TEMP_digestOpCount += sumArrayValues(nValues, 0, nValues.length); // TODO: Remove
+    return runWebGpuComputeShaderAsync(bufs, nValues);
 }
 
 /**
@@ -1331,6 +1980,20 @@ function arrayBufferToHex(buf)
     }
 
     return hex;
+}
+
+/**
+ * Copies the contents of one array buffer to another.
+ * 
+ * @param {ArrayBuffer} src The array buffer to copy the contents of.
+ * @param {Number} srcOffset The offset within `src` to copy the contents of.
+ * @param {ArrayBuffer} dest The array buffer to copy the contents of `src` to.
+ * @param {Number} destOffset The offset within `dest` to copy the contents of `src` to.
+ * @param {Number} length The number of bytes to copy.
+ */
+function copyBufferToBuffer(src, srcOffset, dest, destOffset, length)
+{
+    new Uint8Array(dest, destOffset, length).set(new Uint8Array(src, srcOffset, length));
 }
 
 /**
