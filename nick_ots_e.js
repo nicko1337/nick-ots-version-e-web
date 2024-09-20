@@ -537,7 +537,7 @@ async function processGeneratePublicKeyFormElementsAsync(form)
         // Delta values
         for(let gi = 0; gi < conf.numGroups; gi++)
         {
-            for(let i = 0; i < conf.group.numDeltaIndices; i++)
+            for(let i = 0; i < conf.group.numValues; i++)
             {
                 publicKeyLeafNodePromises[chainI] = digestChain(HASH_SHA256_NAME, privateKeyPromises[chainI], conf.group.maxDeltaValue);
                 chainI++;
@@ -665,7 +665,7 @@ async function processGenerateSignatureFormElementsAsync(form)
         // Delta values
         for(let gi = 0; gi < conf.numGroups; gi++)
         {
-            for(let i = 0; i < conf.group.numDeltaIndices; i++)
+            for(let i = 0; i < conf.group.numValues; i++)
             {
                 sigChainValuePromises[chainI] = digestChain(HASH_SHA256_NAME, privateKeyPromises[chainI], conf.group.maxDeltaValue - groups[gi].deltaValues[i]);
                 chainI++;
@@ -828,7 +828,7 @@ async function processVerifyFormElementsAsync(form)
         // Delta values
         for(let gi = 0; gi < conf.numGroups; gi++)
         {
-            for(let i = 0; i < conf.group.numDeltaIndices; i++)
+            for(let i = 0; i < conf.group.numValues; i++)
             {
                 derivedPublicKeyLeafNodePromises[chainI] = digestChain(HASH_SHA256_NAME, signatureBufs[chainI], groups[gi].deltaValues[i]);
                 chainI++;
@@ -1437,7 +1437,7 @@ function createSigConfig()
     const conf = new SigConfig();
     conf.numValues = HASH_SHA256_BIT_LENGTH / 8;
     conf.group = createSigGroupConfig(4);
-    conf.numGroups = conf.numValues / conf.group.numDeltaIndices;
+    conf.numGroups = conf.numValues / conf.group.numValues;
     conf.checksum = createSigChecksumConfig(conf.group.maxChecksum * conf.numGroups);
     conf.numChains =
         conf.group.numChains * conf.numGroups +
@@ -1449,20 +1449,20 @@ function createSigConfig()
 /**
  * Creates a new signature group configuration object.
  * 
- * @param {Number} numDeltaIndices The number of delta indices per group.
+ * @param {Number} numValues The number of values per group.
  * @returns {SigGroupConfig} The signature group configuration.
  */
-function createSigGroupConfig(numDeltaIndices)
+function createSigGroupConfig(numValues)
 {
     const gconf = new SigGroupConfig();
-    gconf.numDeltaIndices = numDeltaIndices;
+    gconf.numValues = numValues;
     gconf.numChains =
-        gconf.numDeltaIndices + // Delta values
+        gconf.numValues + // Delta values
         1; // Permutation ID
 
-    gconf.maxDeltaIndex = gconf.numDeltaIndices - 1;
+    gconf.maxDeltaIndex = gconf.numValues - 1;
     gconf.maxDeltaValue = 255;
-    gconf.maxPermutationId = factorial(gconf.numDeltaIndices) - 1;
+    gconf.maxPermutationId = factorial(gconf.numValues) - 1;
     gconf.maxChecksum =
         gconf.maxDeltaValue + // Final delta value
         gconf.maxPermutationId; // Permutation ID
@@ -1515,9 +1515,9 @@ function createSigGroupsBySigConfig(config, hashBuf)
 {
     const groups = [ ];
 
-    for(let i = 0, chi = 0; i < config.numGroups; i++, chi += config.group.numDeltaIndices)
+    for(let i = 0, chi = 0; i < config.numGroups; i++, chi += config.group.numValues)
     {
-        groups.push(createSigGroup(new Uint8Array(hashBuf, chi, config.group.numDeltaIndices)));
+        groups.push(createSigGroup(new Uint8Array(hashBuf, chi, config.group.numValues)));
     }
 
     return groups;
@@ -1550,12 +1550,12 @@ function populateSigGroupsBySigConfig(config, groups)
             (config.group.maxDeltaValue - getLargestValue(groups[i].values)) +
             (config.group.maxPermutationId - groups[i].permutationId);
 
-        if(sumArrayValues(groups[i].deltaIndices, 0, config.group.numDeltaIndices) !== sumZeroToN(config.group.maxDeltaIndex))
+        if(sumArrayValues(groups[i].deltaIndices, 0, config.group.numValues) !== sumZeroToN(config.group.maxDeltaIndex))
         {
             throw new Error("Invalid delta indices!");
         }
     
-        if(sumArrayValues(groups[i].deltaValues, 0, config.group.numDeltaIndices) !== getLargestValue(groups[i].values))
+        if(sumArrayValues(groups[i].deltaValues, 0, config.group.numValues) !== getLargestValue(groups[i].values))
         {
             throw new Error("Invalid delta values!");
         }
@@ -1578,7 +1578,7 @@ class SigConfig
 
 class SigGroupConfig
 {
-    numDeltaIndices = -1;
+    numValues = -1;
     numChains = -1;
 
     maxDeltaIndex = -1;
