@@ -4,7 +4,6 @@
 // TODO: WebGPU implementation
 // TODO: Checksum chain values are in little endian. Fix?
 // TODO: Move form inputs to dedicated classes?
-// TODO: Include content hash in signature filename?
 
 // Public key generation form
 const FORM_GENERATE_PUBLIC_KEY_NAME = "ots-generate-public-key";
@@ -37,6 +36,9 @@ const GENERATE_SIGNATURE_OUTPUT_SIGNATURE_ANCHOR_ID = "generate-signature-output
 const VERIFY_OUTPUT_CONTAINER_ID = "verify-output-container";
 const VERIFY_OUTPUT_STATUS_PASS_ID = "verify-output-status-pass";
 const VERIFY_OUTPUT_STATUS_FAIL_ID = "verify-output-status-fail";
+
+// Text replacement placeholders
+const GENERATE_SIGNATURE_OUTPUT_SIGNATURE_ANCHOR_DOWNLOAD_PATTERN_CONTENT_HASH_REPLACE = "{H}";
 
 // Hash function properties
 /** @type {DigestAlgo} */
@@ -689,7 +691,7 @@ async function processGenerateSignatureFormElementsAsync(form)
     const signature = concatenateArrayBuffers(sigChainBufs);
 
     // Done!
-    outputGenerateSignatureValues(signature);
+    outputGenerateSignatureValues(signature, contentHashBuf);
 }
 
 /**
@@ -879,8 +881,9 @@ function outputGeneratePublicKeyValues(publicKey)
  * @see processGenerateSignatureFormElementsAsync
  * 
  * @param {ArrayBuffer} signature The signature.
+ * @param {ArrayBuffer} hashBuf The content hash.
  */
-function outputGenerateSignatureValues(signature)
+function outputGenerateSignatureValues(signature, hashBuf)
 {
     // Output signature
     const sigTextarea = /** @type {HTMLTextAreaElement} */ (document.getElementById(GENERATE_SIGNATURE_OUTPUT_SIGNATURE_TEXTAREA_ID));
@@ -893,7 +896,8 @@ function outputGenerateSignatureValues(signature)
         URL.revokeObjectURL(sigAnchor.href);
     }
 
-    sigAnchor.download = /** @type {String} */ (sigAnchor.dataset.downloadPattern);
+    sigAnchor.download = /** @type {String} */ (sigAnchor.dataset.downloadPattern)
+        .replace(GENERATE_SIGNATURE_OUTPUT_SIGNATURE_ANCHOR_DOWNLOAD_PATTERN_CONTENT_HASH_REPLACE, arrayBufferToHex(hashBuf));
     sigAnchor.href = URL.createObjectURL(new Blob([ signature ], { type: "application/octet-stream" }));
 
     // Unhide container
