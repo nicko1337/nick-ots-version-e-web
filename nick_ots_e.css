@@ -1,0 +1,121 @@
+:root
+{
+    --bg-color: #e0e0e0;
+    --text-color: black;
+    --anchor-color: auto;
+
+    background-color: var(--bg-color);
+    color: var(--text-color);
+}
+
+
+/* Sizing */
+
+body
+{
+    --body-margin: 1.5rem;
+    margin: var(--body-margin);
+}
+
+details
+{
+    margin-bottom: 1em; /* Give some breathing room for the cursor in between collapsed menus */
+}
+
+summary > h2
+{
+    display: inline-block;
+}
+
+.hex256
+{
+    /* 256 bits, represented as 64 hexadecimal chars */
+    width: 64ch;
+}
+
+.hexScrollable256
+{
+    width: 66ch; /* Accommodate for scroll bar */
+    height: 16lh;
+    scrollbar-gutter: stable;
+}
+
+
+/* Fonts */
+
+body
+{
+    font-size: 1.25rem;
+    font-family: sans-serif;
+}
+
+code,
+.hex256
+{
+    font-family: monospace;
+}
+
+input,
+select,
+textarea
+{
+    font-size: 1em; /* Use same font size as parent */
+}
+
+a
+{
+    color: var(--anchor-color);
+}
+
+
+/* Word wrap */
+
+body
+{
+    hyphens: auto;
+}
+
+code,
+input,
+textarea
+{
+    hyphens: none;
+}
+
+code
+{
+    word-break: break-all;
+}
+
+input,
+textarea
+{
+    max-width: calc(100dvw - var(--body-margin) * 2); /* This doesn't account for browser styling but I don't care */
+}
+
+
+/* Misc. */
+
+summary
+{
+    cursor: pointer;
+}
+
+.disabled
+{
+    opacity: 50%;
+    user-select: none;
+}
+
+
+/* Media queries */
+
+@media (prefers-color-scheme: dark)
+{
+    :root
+    {
+        --bg-color: #202020;
+        --text-color: #e0e0e0;
+        --anchor-color: #0077ff;
+    }
+}

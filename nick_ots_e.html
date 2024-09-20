@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <title>OTS test (version E)</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <link href="nick_ots_e.css" rel="stylesheet">
+        <script src="nick_ots_e.js"></script>
+    </head>
+    <body>
+        <h1>OTS test (version E)</h1>
+        <details open>
+            <summary>
+                <h2>Generate public key</h2>
+            </summary>
+            <div id="generate-public-key-input-container">
+                <h3>Input</h3>
+                <form name="ots-generate-public-key">
+                    <div>
+                        <label>
+                            <span>Master key: </span><input name="master-key" class="hex256" type="text" autocomplete="off" placeholder="Hexadecimal chars here..." value="fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210" required>
+                        </label>
+                    </div>
+                    <div>
+                        <input name="submit" type="submit" disabled>
+                    </div>
+                </form>
+            </div>
+            <div id="generate-public-key-output-container" hidden>
+                <h3>Output</h3>
+                <div>
+                    <span>Public key: </span><code id="generate-public-key-output-public-key">PUBLIC KEY</code>
+                </div>
+            </div>
+        </details>
+        <details>
+            <summary>
+                <h2>Generate signature</h2>
+            </summary>
+            <div id="generate-signature-input-container">
+                <h3>Input</h3>
+                <form name="ots-generate-signature">
+                    <div>
+                        <label>
+                            <span>Master key: </span><input name="master-key" class="hex256" type="text" autocomplete="off" placeholder="Hexadecimal chars here..." value="" required>
+                        </label>
+                    </div>
+                    <div>
+                        <label>
+                            <span>Content hash (SHA-256): </span><input name="content-hash" class="hex256" type="text" autocomplete="off" placeholder="Hexadecimal chars here..." value="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" required>
+                        </label>
+                    </div>
+                    <div>
+                        <input name="submit" type="submit" disabled>
+                    </div>
+                </form>
+            </div>
+            <div id="generate-signature-output-container" hidden>
+                <h3>Output</h3>
+                <div>
+                    <div>Signature:</div>
+                    <textarea id="generate-signature-output-signature-textarea" class="hexScrollable256"></textarea>
+                    <div>
+                        <a id="generate-signature-output-signature-anchor" data-download-pattern="signature-vE.bin">Download</a>
+                    </div>
+                </div>
+            </div>
+        </details>
+        <details>
+            <summary>
+                <h2>Verify signature</h2>
+            </summary>
+            <div id="verify-input-container">
+                <h3>Input</h3>
+                <form name="ots-verify">
+                    <div>
+                        <label>
+                            <span>Content hash (SHA-256): </span><input name="content-hash" class="hex256" type="text" autocomplete="off" placeholder="Hexadecimal chars here..." required>
+                        </label>
+                    </div>
+                    <div>
+                        <label>
+                            <span>Public key (SHA-256): </span><input name="public-key" class="hex256" type="text" autocomplete="off" placeholder="Hexadecimal chars here..." required>
+                        </label>
+                    </div>
+                    <div>
+                        <label>
+                            <span>Signature: </span><input name="signature" type="file" autocomplete="off" required>
+                        </label>
+                    </div>
+                    <div>
+                        <input name="submit" type="submit" disabled>
+                    </div>
+                </form>
+            </div>
+            <div id="verify-output-container" hidden>
+                <h3>Output</h3>
+                <div>
+                    <span>Status: </span><span id="verify-output-status-pass" hidden>Pass</span><span id="verify-output-status-fail" hidden>Fail</span>
+                </div>
+            </div>
+        </details>
+    </body>
+</html>
