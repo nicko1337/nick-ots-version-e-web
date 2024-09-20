@@ -528,13 +528,10 @@ async function processGeneratePublicKeyFormElementsAsync(form)
         }
 
         // Permutation ID
-        if(conf.group.hasPermutationId)
+        for(let gi = 0; gi < conf.numGroups; gi++)
         {
-            for(let gi = 0; gi < conf.numGroups; gi++)
-            {
-                publicKeyLeafNodePromises[chainI] = digestChain(HASH_SHA256_NAME, privateKeyPromises[chainI], conf.group.maxPermutationId);
-                chainI++;
-            }
+            publicKeyLeafNodePromises[chainI] = digestChain(HASH_SHA256_NAME, privateKeyPromises[chainI], conf.group.maxPermutationId);
+            chainI++;
         }
 
         // Delta values
@@ -659,13 +656,10 @@ async function processGenerateSignatureFormElementsAsync(form)
         }
 
         // Permutation ID
-        if(conf.group.hasPermutationId)
+        for(let gi = 0; gi < conf.numGroups; gi++)
         {
-            for(let gi = 0; gi < conf.numGroups; gi++)
-            {
-                sigChainValuePromises[chainI] = digestChain(HASH_SHA256_NAME, privateKeyPromises[chainI], conf.group.maxPermutationId - groups[gi].permutationId);
-                chainI++;
-            }
+            sigChainValuePromises[chainI] = digestChain(HASH_SHA256_NAME, privateKeyPromises[chainI], conf.group.maxPermutationId - groups[gi].permutationId);
+            chainI++;
         }
 
         // Delta values
@@ -825,13 +819,10 @@ async function processVerifyFormElementsAsync(form)
         }
 
         // Permutation ID
-        if(conf.group.hasPermutationId)
+        for(let gi = 0; gi < conf.numGroups; gi++)
         {
-            for(let gi = 0; gi < conf.numGroups; gi++)
-            {
-                derivedPublicKeyLeafNodePromises[chainI] = digestChain(HASH_SHA256_NAME, signatureBufs[chainI], groups[gi].permutationId);
-                chainI++;
-            }
+            derivedPublicKeyLeafNodePromises[chainI] = digestChain(HASH_SHA256_NAME, signatureBufs[chainI], groups[gi].permutationId);
+            chainI++;
         }
 
         // Delta values
@@ -1467,7 +1458,7 @@ function createSigGroupConfig(numDeltaIndices)
     gconf.numDeltaIndices = numDeltaIndices;
     gconf.numChains =
         gconf.numDeltaIndices +
-        Number(gconf.hasPermutationId) +
+        1 + // Permutation ID
         numDeltaIndices;
 
     gconf.maxDeltaIndex = gconf.numDeltaIndices - 1;
@@ -1589,7 +1580,6 @@ class SigConfig
 class SigGroupConfig
 {
     numDeltaIndices = -1;
-    hasPermutationId = false;
     numChains = -1;
 
     maxDeltaIndex = -1;
