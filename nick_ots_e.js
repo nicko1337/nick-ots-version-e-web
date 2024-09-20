@@ -1535,7 +1535,7 @@ function createSigGroupsBySigConfig(config, hashBuf)
  * @param {SigGroup[]} groups The signature groups.
  * @returns {Number} The checksum of the signature groups.
  * @throws {Error} The delta indices are invalid.
- * @throws {Errror} The delta values are invalid.
+ * @throws {Error} The delta values are invalid.
  */
 function populateSigGroupsBySigConfig(config, groups)
 {
