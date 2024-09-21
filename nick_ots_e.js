@@ -526,11 +526,14 @@ async function processGeneratePublicKeyFormElementsAsync(form)
             );
         let chainI = 0;
 
-        // Checksum
-        for(let cni = 0; cni < conf.checksum.numNumerals; cni++)
+        // Delta values
+        for(let gi = 0; gi < conf.numGroups; gi++)
         {
-            publicKeyLeafNodePromises[chainI] = digestChain(HASH_SHA256_NAME, privateKeyPromises[chainI], conf.checksum.maxNumeralValue);
-            chainI++;
+            for(let i = 0; i < conf.group.numValues; i++)
+            {
+                publicKeyLeafNodePromises[chainI] = digestChain(HASH_SHA256_NAME, privateKeyPromises[chainI], conf.group.maxDeltaValue);
+                chainI++;
+            }
         }
 
         // Permutation ID
@@ -540,14 +543,11 @@ async function processGeneratePublicKeyFormElementsAsync(form)
             chainI++;
         }
 
-        // Delta values
-        for(let gi = 0; gi < conf.numGroups; gi++)
+        // Checksum
+        for(let cni = 0; cni < conf.checksum.numNumerals; cni++)
         {
-            for(let i = 0; i < conf.group.numValues; i++)
-            {
-                publicKeyLeafNodePromises[chainI] = digestChain(HASH_SHA256_NAME, privateKeyPromises[chainI], conf.group.maxDeltaValue);
-                chainI++;
-            }
+            publicKeyLeafNodePromises[chainI] = digestChain(HASH_SHA256_NAME, privateKeyPromises[chainI], conf.checksum.maxNumeralValue);
+            chainI++;
         }
 
         // All done!
@@ -653,12 +653,14 @@ async function processGenerateSignatureFormElementsAsync(form)
             );
         let chainI = 0;
 
-        // Checksum
-        for(let i = 0, shift = 0; i < conf.checksum.numNumerals; i++, shift += conf.checksum.numeralBaseLog2)
+        // Delta values
+        for(let gi = 0; gi < conf.numGroups; gi++)
         {
-            const numeral = (checksum >>> shift) & conf.checksum.maxNumeralValue;
-            sigChainValuePromises[chainI] = digestChain(HASH_SHA256_NAME, privateKeyPromises[chainI], conf.checksum.maxNumeralValue - numeral);
-            chainI++;
+            for(let i = 0; i < conf.group.numValues; i++)
+            {
+                sigChainValuePromises[chainI] = digestChain(HASH_SHA256_NAME, privateKeyPromises[chainI], conf.group.maxDeltaValue - groups[gi].deltaValues[i]);
+                chainI++;
+            }
         }
 
         // Permutation ID
@@ -668,14 +670,12 @@ async function processGenerateSignatureFormElementsAsync(form)
             chainI++;
         }
 
-        // Delta values
-        for(let gi = 0; gi < conf.numGroups; gi++)
+        // Checksum
+        for(let i = 0, shift = 0; i < conf.checksum.numNumerals; i++, shift += conf.checksum.numeralBaseLog2)
         {
-            for(let i = 0; i < conf.group.numValues; i++)
-            {
-                sigChainValuePromises[chainI] = digestChain(HASH_SHA256_NAME, privateKeyPromises[chainI], conf.group.maxDeltaValue - groups[gi].deltaValues[i]);
-                chainI++;
-            }
+            const numeral = (checksum >>> shift) & conf.checksum.maxNumeralValue;
+            sigChainValuePromises[chainI] = digestChain(HASH_SHA256_NAME, privateKeyPromises[chainI], conf.checksum.maxNumeralValue - numeral);
+            chainI++;
         }
 
         // All done!
@@ -816,12 +816,14 @@ async function processVerifyFormElementsAsync(form)
             );
         let chainI = 0;
 
-        // Checksum
-        for(let i = 0, shift = 0; i < conf.checksum.numNumerals; i++, shift += conf.checksum.numeralBaseLog2)
+        // Delta values
+        for(let gi = 0; gi < conf.numGroups; gi++)
         {
-            const numeral = (checksum >>> shift) & conf.checksum.maxNumeralValue;
-            derivedPublicKeyLeafNodePromises[chainI] = digestChain(HASH_SHA256_NAME, signatureBufs[chainI], numeral);
-            chainI++;
+            for(let i = 0; i < conf.group.numValues; i++)
+            {
+                derivedPublicKeyLeafNodePromises[chainI] = digestChain(HASH_SHA256_NAME, signatureBufs[chainI], groups[gi].deltaValues[i]);
+                chainI++;
+            }
         }
 
         // Permutation ID
@@ -831,14 +833,12 @@ async function processVerifyFormElementsAsync(form)
             chainI++;
         }
 
-        // Delta values
-        for(let gi = 0; gi < conf.numGroups; gi++)
+        // Checksum
+        for(let i = 0, shift = 0; i < conf.checksum.numNumerals; i++, shift += conf.checksum.numeralBaseLog2)
         {
-            for(let i = 0; i < conf.group.numValues; i++)
-            {
-                derivedPublicKeyLeafNodePromises[chainI] = digestChain(HASH_SHA256_NAME, signatureBufs[chainI], groups[gi].deltaValues[i]);
-                chainI++;
-            }
+            const numeral = (checksum >>> shift) & conf.checksum.maxNumeralValue;
+            derivedPublicKeyLeafNodePromises[chainI] = digestChain(HASH_SHA256_NAME, signatureBufs[chainI], numeral);
+            chainI++;
         }
 
         // All done!
