@@ -1162,7 +1162,7 @@ function calculatePermutationIdFromDeltaIndices(deltaIndices)
 {
     let id = 0;
 
-    for(let i = 0; i < deltaIndices.length; i++)
+    for(let i = 0; i < deltaIndices.length - 1; i++)
     {
         id = id * (deltaIndices.length - i) + getIndexInSortedArray(deltaIndices, i, i, deltaIndices.length);
     }
