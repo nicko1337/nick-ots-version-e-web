@@ -1076,50 +1076,15 @@ function getIndexInSortedArray(unsorted, startIdx, unsortedIdx, endIdx)
 }
 
 /**
- * Calculates the delta indices of a given unsorted array of numbers.
- * 
- * @param {NumericArray} nums The unsorted array of numbers.
- * @param {NumericArray|null} deltaIndicesDest The array to place the delta indices in. If provided, the length must not be less than `nums.length`. If not provided, a copy of `nums` will be used.
- * @returns {NumericArray} The array of delta indices. A number at index `i` indicates the index at which `nums[i]`'s corresponding delta value should be placed.
- * @throws {RangeError} The given array of delta indices is too short to fit every delta index of `nums`.
- */
-function getDeltaIndices(nums, deltaIndicesDest = null)
-{
-    if(!deltaIndicesDest)
-    {
-        deltaIndicesDest = nums.slice();
-    }
-    else if(deltaIndicesDest.length < nums.length)
-    {
-        throw new RangeError("Delta indices destination array is too short!");
-    }
-
-    for(let i = 0; i < nums.length; i++)
-    {
-        deltaIndicesDest[i] = getIndexInSortedArray(nums, 0, i, nums.length);
-    }
-
-    return deltaIndicesDest;
-}
-
-/**
  * Calculates the delta values of a given unsorted array of numbers.
- * @see getDeltaIndices
  * 
  * @param {NumericArray} nums The unsorted array of numbers.
- * @param {NumericArray} deltaIndices The delta indices of `nums`.
  * @param {NumericArray|null} deltaValuesDest The array to place the delta values in. If provided, the length must not be less than `nums.length`. If not provided, a copy of `nums` will be used.
- * @returns {NumericArray} The array of delta values. A number at index `i` indicates the index at which `nums[j]`'s corresponding delta value should be placed, where `j` is the index at which `deltaIndices[j] = i`.
- * @throws {RangeError} The two required arrays (`nums` and `deltaIndices`) have unequal lengths.
+ * @returns {NumericArray} The array of delta values. A number at index `i` indicates the index at which `nums[j]`'s corresponding delta value should be placed, where `j` is the index at which `getSortexIndexInArray(values, 0, j, values.length) = i`.
  * @throws {RangeError} The given array of delta values is too short to fit every delta value of `nums`.
  */
-function getDeltaValues(nums, deltaIndices, deltaValuesDest = null)
+function getDeltaValues(nums, deltaValuesDest = null)
 {
-    if(nums.length !== deltaIndices.length)
-    {
-        throw new RangeError("The two given arrays must be of equal length!");
-    }
-
     if(!deltaValuesDest)
     {
         deltaValuesDest = nums.slice();
@@ -1132,14 +1097,15 @@ function getDeltaValues(nums, deltaIndices, deltaValuesDest = null)
     // First, place the sorted numbers (which are not differences yet)
     for(let i = 0; i < nums.length; i++)
     {
-        deltaValuesDest[deltaIndices[i]] = nums[i];
+        const sortedIdx = getIndexInSortedArray(nums, 0, i, nums.length);
+        deltaValuesDest[sortedIdx] = nums[i];
     }
 
     // Now calculate the differences
-    for(let i = 0, deltaValue = 0, prevSortedValue = 0; i < deltaIndices.length; i++)
+    for(let i = 0, prevSortedValue = 0; i < nums.length; i++)
     {
         // We have to use this awkward ordering so that we don't set the previous sorted number to the current delta value (which is a difference, not a sorted value)
-        deltaValue = deltaValuesDest[i] - prevSortedValue;
+        const deltaValue = deltaValuesDest[i] - prevSortedValue;
         prevSortedValue = deltaValuesDest[i];
         deltaValuesDest[i] = deltaValue;
     }
@@ -1148,22 +1114,20 @@ function getDeltaValues(nums, deltaIndices, deltaValuesDest = null)
 }
 
 /**
- * Calculates a permutation ID for an array of delta indices.
+ * Calculates a permutation ID for an array of unsorted values.
  * 
- * This function is used to calculate a permutation ID for a signature's delta indices.
- * @see getDeltaIndices
+ * This function is used to calculate a permutation ID for a signature group.
  * 
- * @param {NumericArray} deltaIndices The delta indices to use.
- * @returns {Number} The permutation ID of the delta indices.
- * @throws {RangeError} The number of delta values/indices is greater than the number of delta indices provided.
+ * @param {NumericArray} values The unsorted values to use.
+ * @returns {Number} The permutation ID of the unsorted values.
  */
-function calculatePermutationIdFromDeltaIndices(deltaIndices)
+function calculatePermutationIdFromUnsortedValues(values)
 {
     let id = 0;
 
-    for(let i = 0; i < deltaIndices.length - 1; i++)
+    for(let i = 0; i < values.length - 1; i++)
     {
-        id = id * (deltaIndices.length - i) + getIndexInSortedArray(deltaIndices, i, i, deltaIndices.length);
+        id = id * (values.length - i) + getIndexInSortedArray(values, i, i, values.length);
     }
 
     return id;
@@ -1480,7 +1444,6 @@ function createSigGroup(values)
     const group = new SigGroup();
     group.values = values;
     group.deltaValues = group.values.slice().fill(0);
-    group.deltaIndices = group.deltaValues.slice();
     return group;
 }
 
@@ -1509,7 +1472,7 @@ function createSigGroupsBySigConfig(config, hashBuf)
 /**
  * Calculates and sets the proper values for a signature's groups based on its signature configuration, and returns the checksum of said groups.
  * 
- * Specifically, this function sets the delta indices, delta values, and permutation ID of each group. The checksum is calculated and returned.
+ * Specifically, this function sets the delta values and permutation ID of each group. The checksum is calculated and returned.
  * 
  * Each group's values must already be initialized with the proper values.
  * @see createSigGroupsBySigConfig
@@ -1517,7 +1480,6 @@ function createSigGroupsBySigConfig(config, hashBuf)
  * @param {SigConfig} config The signature configuration.
  * @param {SigGroup[]} groups The signature groups.
  * @returns {Number} The checksum of the signature groups.
- * @throws {Error} The delta indices are invalid.
  * @throws {Error} The delta values are invalid.
  */
 function populateSigGroupsBySigConfig(config, groups)
@@ -1526,17 +1488,11 @@ function populateSigGroupsBySigConfig(config, groups)
 
     for(let i = 0; i < config.numGroups; i++)
     {
-        getDeltaIndices(groups[i].values, groups[i].deltaIndices);
-        getDeltaValues(groups[i].values, groups[i].deltaIndices, groups[i].deltaValues);
-        groups[i].permutationId = calculatePermutationIdFromDeltaIndices(groups[i].deltaIndices);
+        getDeltaValues(groups[i].values, groups[i].deltaValues);
+        groups[i].permutationId = calculatePermutationIdFromUnsortedValues(groups[i].values);
         checksum +=
             (config.group.maxDeltaValue - getLargestValue(groups[i].values)) +
             (config.group.maxPermutationId - groups[i].permutationId);
-
-        if(sumArrayValues(groups[i].deltaIndices, 0, config.group.numValues) !== sumZeroToN(config.group.maxDeltaIndex))
-        {
-            throw new Error("Invalid delta indices!");
-        }
     
         if(sumArrayValues(groups[i].deltaValues, 0, config.group.numValues) !== getLargestValue(groups[i].values))
         {
@@ -1583,8 +1539,6 @@ class SigGroup
 {
     /** @type {NumericArray} */
     values = null;
-    /** @type {NumericArray} */
-    deltaIndices = null;
     /** @type {NumericArray} */
     deltaValues = null;
     permutationId = -1;
