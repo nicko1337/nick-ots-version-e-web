@@ -455,7 +455,6 @@ function processVerifyForm(form)
     const formSignatureInput = form.elements[FORM_VERIFY_ELEMENT_SIGNATURE_NAME];
     const signatureFile = (/** @type {FileList} */ (formSignatureInput.files))[0];
 
-    console.time(PERFORMANCE_TIMER_NAME);
     signatureFile.arrayBuffer()
         .then(
             buf =>
