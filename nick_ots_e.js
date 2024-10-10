@@ -1,7 +1,6 @@
 "use strict";
 
 // TODO: Consider mixing in some extra data regarding the parameter set (PRF, maybe more?).
-// TODO: WebGPU implementation
 // TODO: Checksum chain values are in little endian. Fix?
 // TODO: Move form inputs to dedicated classes?
 
