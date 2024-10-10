@@ -1152,7 +1152,6 @@ function getDeltaValues(nums, deltaIndices, deltaValuesDest = null)
  * 
  * This function is used to calculate a permutation ID for a signature's delta indices.
  * @see getDeltaIndices
- * @see calculatePermutationIdFromChoices
  * 
  * @param {NumericArray} deltaIndices The delta indices to use.
  * @returns {Number} The permutation ID of the delta indices.
