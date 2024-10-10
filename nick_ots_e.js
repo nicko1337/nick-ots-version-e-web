@@ -451,8 +451,20 @@ function processVerifyForm(form)
     const PERFORMANCE_TIMER_NAME = "Signature verification";
     form.elements[FORM_VERIFY_ELEMENT_SUBMIT_NAME].disabled = true;
 
+    /** @type {HTMLInputElement} */
+    const formSignatureInput = form.elements[FORM_VERIFY_ELEMENT_SIGNATURE_NAME];
+    const signatureFile = (/** @type {FileList} */ (formSignatureInput.files))[0];
+
     console.time(PERFORMANCE_TIMER_NAME);
-    processVerifyFormElementsAsync(form)
+    signatureFile.arrayBuffer()
+        .then(
+            buf =>
+            {
+                console.time(PERFORMANCE_TIMER_NAME);
+                return buf;
+            }
+        )
+        .then(buf => processVerifyFormElementsAsync(form, formSignatureInput, buf))
         .finally(() => { console.timeEnd(PERFORMANCE_TIMER_NAME); }) // Before catch so the timer isn't affected by any error handling
         .catch(onError)
         .finally(
@@ -703,11 +715,13 @@ async function processGenerateSignatureFormElementsAsync(form)
  * @see outputVerifyValues
  * 
  * @param {HTMLFormElement} form The signature verification form.
+ * @param {HTMLInputElement} formSignatureInput The form element that provided `signatureBuf`.
+ * @param {ArrayBuffer} signatureBuf The signature buffer.
  * @returns {Promise<void>} A promise that resolves once signature verification is complete and the results have been output.
  * @throws {null} An error which does not require further handling has occurred.
  * @throws {Error} A sanity check failed to pass.
  */
-async function processVerifyFormElementsAsync(form)
+async function processVerifyFormElementsAsync(form, formSignatureInput, signatureBuf)
 {
     TEMP_digestOpCount = 0; // TODO: Remove
 
@@ -716,13 +730,10 @@ async function processVerifyFormElementsAsync(form)
     const formContentHashInput = form.elements[FORM_VERIFY_ELEMENT_CONTENT_HASH_NAME];
     /** @type {HTMLInputElement} */
     const formPublicKeyInput = form.elements[FORM_VERIFY_ELEMENT_PUBLIC_KEY_NAME];
-    /** @type {HTMLInputElement} */
-    const formSignatureInput = form.elements[FORM_VERIFY_ELEMENT_SIGNATURE_NAME];
 
     // Retrieve form values before async goes into effect
     const contentHashHex = formContentHashInput.value;
     const publicKeyHex = formPublicKeyInput.value;
-    const signatureFile = (/** @type {FileList} */ (formSignatureInput.files))[0];
 
     // Validate content hash in input form
     /** @type {ArrayBuffer|null} */
@@ -764,9 +775,6 @@ async function processVerifyFormElementsAsync(form)
         throw null;
     }
 
-    // Begin reading signature from file
-    const signatureBufPromise = signatureFile.arrayBuffer();
-
     // Context setup
     const conf = createSigConfig();
     const groups = createSigGroupsBySigConfig(conf, contentHashBuf);
@@ -780,8 +788,6 @@ async function processVerifyFormElementsAsync(form)
 
     try
     {
-        const signatureBuf = await signatureBufPromise;
-
         if(signatureBuf.byteLength !== conf.numChains * (HASH_SHA256_BIT_LENGTH / 8))
         {
             throw new Error("Invalid signature!");
